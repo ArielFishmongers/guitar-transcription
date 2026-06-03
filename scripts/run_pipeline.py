@@ -15,6 +15,39 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from gtab.io.export import save_json, save_stems  # noqa: E402
 from gtab.pipeline import build_default_pipeline  # noqa: E402
+from gtab.types import TranscriptionResult  # noqa: E402
+
+_NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def midi_to_name(pitch_midi: float) -> str:
+    """MIDI note number -> scientific pitch name, e.g. 52 -> 'E3'."""
+    m = int(round(pitch_midi))
+    return f"{_NOTE_NAMES[m % 12]}{m // 12 - 1}"
+
+
+def print_notes(result: TranscriptionResult) -> None:
+    """Print a readable, time-ordered table of recognised notes."""
+    notes = sorted(result.notes, key=lambda n: (n.note.onset, n.note.pitch_midi))
+    if not notes:
+        print("No notes recognised.")
+        return
+
+    if result.tempo_bpm is not None:
+        print(f"Tempo: {result.tempo_bpm:.1f} BPM")
+    print(f"Recognised {len(notes)} notes:\n")
+
+    header = f"  {'#':>3}  {'onset':>7}  {'offset':>7}  {'dur':>6}  {'pitch':<7}  {'conf':>5}  techniques"
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    for i, an in enumerate(notes, 1):
+        n = an.note
+        pitch = f"{midi_to_name(n.pitch_midi)}({int(round(n.pitch_midi))})"
+        techs = ", ".join(t.value for t in an.techniques)
+        print(
+            f"  {i:>3}  {n.onset:>7.3f}  {n.offset:>7.3f}  {n.duration:>6.3f}  "
+            f"{pitch:<7}  {n.confidence:>5.2f}  {techs}"
+        )
 
 
 def main() -> None:
@@ -38,7 +71,8 @@ def main() -> None:
     if args.stems:
         save_stems(output, args.out)
 
-    print(f"Done. Transcribed {len(output.transcription.notes)} notes -> {notes_path}")
+    print_notes(output.transcription)
+    print(f"\nWrote {len(output.transcription.notes)} notes -> {notes_path}")
 
 
 if __name__ == "__main__":
