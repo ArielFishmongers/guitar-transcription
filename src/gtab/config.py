@@ -26,12 +26,24 @@ def load_config(path: str) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
+def _build_separator(cfg: dict[str, Any]):
+    sep_cfg = cfg.get("separation", {})
+    impl = sep_cfg.get("impl", "passthrough")
+    cls = SEPARATORS[impl]
+    if impl == "demucs":
+        return cls(
+            model_name=sep_cfg.get("model_name", "htdemucs_6s"),
+            device=sep_cfg.get("device", "auto"),
+            shifts=int(sep_cfg.get("shifts", 1)),
+        )
+    return cls()
+
+
 def build_pipeline_from_config(cfg: dict[str, Any]) -> Pipeline:
-    sep_impl = cfg.get("separation", {}).get("impl", "passthrough")
     tr_impl = cfg.get("transcription", {}).get("impl", "basic_pitch")
     tech_impl = cfg.get("techniques", {}).get("impl", "noop")
     return Pipeline(
-        separator=SEPARATORS[sep_impl](),
+        separator=_build_separator(cfg),
         transcriber=TRANSCRIBERS[tr_impl](),
         technique_detector=TECHNIQUES[tech_impl](),
     )

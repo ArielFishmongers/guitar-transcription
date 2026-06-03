@@ -4,8 +4,9 @@ sample_rate: 22050
 
 separation:
   impl: passthrough        # passthrough | demucs
-  model_name: htdemucs_6s
-  device: cpu
+  model_name: htdemucs_6s  # 6-source model: the only one with a guitar stem
+  device: auto             # auto (cuda>mps>cpu) | cpu | cuda | mps
+  shifts: 1                # demucs test-time shifts: higher = better but slower
 
 transcription:
   impl: basic_pitch        # stub | basic_pitch
