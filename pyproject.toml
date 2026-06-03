@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gtab"
+version = "0.1.0"
+description = "Audio-to-guitar-tab signal processing pipeline"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "librosa>=0.10",
+    "soundfile>=0.12",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+separation = ["demucs>=4.0", "torch>=2.0"]
+transcription = ["basic-pitch>=0.3", "soundfile>=0.12"]
+midi = ["pretty_midi>=0.2"]
+dev = ["pytest>=7.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

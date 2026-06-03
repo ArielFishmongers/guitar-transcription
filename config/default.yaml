@@ -1,0 +1,20 @@
+# Pipeline configuration.
+# Each stage's `impl` maps to a class via src/gtab/config.py registries.
+sample_rate: 22050
+
+separation:
+  impl: passthrough        # passthrough | demucs
+  model_name: htdemucs_6s
+  device: cpu
+
+transcription:
+  impl: basic_pitch        # stub | basic_pitch
+  onset_threshold: 0.5
+  frame_threshold: 0.3
+
+techniques:
+  impl: noop               # noop | contour
+
+export:
+  stems: false
+  midi: false
