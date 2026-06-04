@@ -1,0 +1,75 @@
+"""Transcription quality metric: note-level precision/recall/F1.
+
+Mirrors the SDR harness in `eval/separation.py`. Uses
+`mir_eval.transcription` to score an estimated `TranscriptionResult` against a
+reference one at three strictnesses (loosest to strictest):
+
+    onset                -- onset within +/-50 ms, pitch & offset ignored
+    onset_offset         -- onset + offset, pitch ignored
+    onset_offset_pitch   -- onset + offset + pitch (within 50 cents)
+
+Offset/pitch strictnesses score lower than onset-only by construction; reporting
+all three shows *which* part of a transcription is failing.
+
+NOTE: full Stage-3 eval (GuitarSet ground truth via mirdata) is still TODO; this
+module is the metric the viz comparison plot visualises. See docs/SPEC_transcription.md.
+"""
+from __future__ import annotations
+
+import numpy as np
+
+from gtab.types import TranscriptionResult
+
+ONSET_TOLERANCE = 0.05  # seconds, the mir_eval / MIREX default
+_IGNORE_PITCH_CENTS = 1.0e9  # huge pitch tolerance == "ignore pitch"
+
+
+def _to_intervals_pitches(result: TranscriptionResult) -> tuple[np.ndarray, np.ndarray]:
+    """TranscriptionResult -> (intervals[N,2] in seconds, pitches[N] in Hz)."""
+    if not result.notes:
+        return np.zeros((0, 2)), np.zeros((0,))
+    intervals = np.array(
+        [[n.note.onset, max(n.note.offset, n.note.onset + 1e-3)] for n in result.notes]
+    )
+    pitches_hz = np.array(
+        [440.0 * 2.0 ** ((n.note.pitch_midi - 69) / 12.0) for n in result.notes]
+    )
+    return intervals, pitches_hz
+
+
+def note_f1(
+    ref: TranscriptionResult,
+    est: TranscriptionResult,
+    onset_tolerance: float = ONSET_TOLERANCE,
+) -> dict[str, float]:
+    """Note-level F1 at three strictnesses (see module docstring)."""
+    import mir_eval
+
+    ref_i, ref_p = _to_intervals_pitches(ref)
+    est_i, est_p = _to_intervals_pitches(est)
+
+    # Both empty -> a vacuously perfect match; one empty -> nothing matches.
+    if len(ref_i) == 0 and len(est_i) == 0:
+        return {k: 1.0 for k in ("onset", "onset_offset", "onset_offset_pitch")}
+    if len(ref_i) == 0 or len(est_i) == 0:
+        return {k: 0.0 for k in ("onset", "onset_offset", "onset_offset_pitch")}
+
+    _, _, onset_f1 = mir_eval.transcription.onset_precision_recall_f1(
+        ref_i, est_i, onset_tolerance=onset_tolerance
+    )
+    _, _, onset_offset_f1, _ = mir_eval.transcription.precision_recall_f1_overlap(
+        ref_i, ref_p, est_i, est_p,
+        onset_tolerance=onset_tolerance,
+        pitch_tolerance=_IGNORE_PITCH_CENTS,  # ignore pitch, keep onset+offset
+        offset_ratio=0.2,
+    )
+    _, _, full_f1, _ = mir_eval.transcription.precision_recall_f1_overlap(
+        ref_i, ref_p, est_i, est_p,
+        onset_tolerance=onset_tolerance,
+        offset_ratio=0.2,  # default pitch_tolerance=50 cents
+    )
+    return {
+        "onset": float(onset_f1),
+        "onset_offset": float(onset_offset_f1),
+        "onset_offset_pitch": float(full_f1),
+    }

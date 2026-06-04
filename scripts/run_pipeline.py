@@ -60,6 +60,12 @@ def main() -> None:
     parser.add_argument(
         "--stems", action="store_true", help="Also export WAV stems (guitar + backing)"
     )
+    parser.add_argument(
+        "--plot",
+        default=None,
+        metavar="PATH",
+        help="Save a piano-roll PNG (notes over the guitar stem's CQT) to PATH",
+    )
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -73,6 +79,18 @@ def main() -> None:
 
     print_notes(output.transcription)
     print(f"\nWrote {len(output.transcription.notes)} notes -> {notes_path}")
+
+    if args.plot:
+        import matplotlib
+
+        matplotlib.use("Agg")  # headless: render straight to file
+        from gtab.viz.pianoroll import plot_transcription
+
+        os.makedirs(os.path.dirname(os.path.abspath(args.plot)), exist_ok=True)
+        plot_transcription(
+            output.transcription, audio=output.stems.guitar, save_path=args.plot
+        )
+        print(f"Wrote piano-roll plot -> {args.plot}")
 
 
 if __name__ == "__main__":

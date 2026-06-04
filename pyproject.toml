@@ -18,7 +18,9 @@ dependencies = [
 separation = ["demucs>=4.0", "torch>=2.0"]
 transcription = ["basic-pitch>=0.3", "soundfile>=0.12"]
 midi = ["pretty_midi>=0.2"]
-dev = ["pytest>=7.0"]
+viz = ["matplotlib>=3.5"]
+eval = ["mir_eval>=0.7", "mirdata>=0.3"]  # note-F1 + GuitarSet ground truth
+dev = ["pytest>=7.0", "matplotlib>=3.5"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

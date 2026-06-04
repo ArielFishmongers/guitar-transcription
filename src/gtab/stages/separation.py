@@ -32,9 +32,12 @@ class DemucsSeparator(Separator):
 
     Uses `htdemucs_6s`, the only widely-deployed open model with a dedicated
     `guitar` stem (4-stem models fold guitar into "other"). The guitar stem is
-    returned as `Stems.guitar`; `Stems.backing` is the sum of every non-guitar
-    stem (so it doubles as a guitar-free play-along track); the individual
-    non-guitar stems are also exposed via `Stems.extras`.
+    returned as `Stems.guitar`. `Stems.backing` is built as the *residual* --
+    the original mix minus the guitar estimate -- so every non-guitar source
+    keeps full original fidelity and artifacts are confined to where the guitar
+    was. (Summing the separated non-guitar stems instead would stack each stem's
+    artifacts and sound muffled, especially the 6-stem model's weak vocals.) The
+    individual separated non-guitar stems are still exposed via `Stems.extras`.
 
     Demucs is a 44.1 kHz stereo model. We resample/upmix the input to the model's
     rate and channels, so any input rate works, but the output stems are always
@@ -144,20 +147,22 @@ class DemucsSeparator(Separator):
         sr = int(model.samplerate)
         guitar = self._tensor_to_buffer(stems[self.GUITAR_STEM], sr)
 
-        backing_sum = None
-        extras: dict[str, AudioBuffer] = {}
-        for name, tensor in stems.items():
-            if name == self.GUITAR_STEM:
-                continue
-            extras[name] = self._tensor_to_buffer(tensor, sr)
-            backing_sum = tensor if backing_sum is None else backing_sum + tensor
+        # Backing = residual: the rate/channel-matched mix (`wav`) minus the
+        # guitar estimate. Both are at the model's rate and sample-aligned, so
+        # non-guitar audio stays at full fidelity (see class docstring). Done in
+        # mono-numpy space (linear, so equals mono(wav - guitar)) to dodge any
+        # CPU/MPS device mismatch between `wav` and the model outputs.
+        mix_mono = self._tensor_to_buffer(wav, sr)
+        backing = AudioBuffer(
+            samples=(mix_mono.samples - guitar.samples).astype(np.float32),
+            sample_rate=sr,
+        )
 
-        if backing_sum is None:  # single-stem model: no backing to build
-            backing = AudioBuffer(
-                samples=np.zeros_like(guitar.samples), sample_rate=sr
-            )
-        else:
-            backing = self._tensor_to_buffer(backing_sum, sr)
+        extras = {
+            name: self._tensor_to_buffer(tensor, sr)
+            for name, tensor in stems.items()
+            if name != self.GUITAR_STEM
+        }
 
         return Stems(guitar=guitar, backing=backing, extras=extras)
 
