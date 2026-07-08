@@ -76,6 +76,11 @@ class NoteEvent:
     pitch_contour: optional list of (time_seconds, midi_pitch) samples. Stage 4
                    reads this to detect bends/slides/vibrato from the F0 trajectory,
                    so it is worth populating in Stage 3 where the method allows.
+    string:        guitar string index, 0=low E ... 5=high E, or None if the
+                   transcriber doesn't predict it. Pitch is recoverable as
+                   open_string_midi[string] + fret (standard tuning open strings:
+                   E2=40, A2=45, D3=50, G3=55, B3=59, E4=64).
+    fret:          fret number (0=open) on `string`, or None if not predicted.
     """
 
     onset: float
@@ -83,6 +88,8 @@ class NoteEvent:
     pitch_midi: float
     confidence: float = 1.0
     pitch_contour: list[tuple[float, float]] | None = None
+    string: int | None = None
+    fret: int | None = None
 
     @property
     def duration(self) -> float:

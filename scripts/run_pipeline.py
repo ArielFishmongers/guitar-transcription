@@ -13,7 +13,7 @@ import sys
 # Allow running from the repo root without installing the package.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from gtab.io.export import save_json, save_stems  # noqa: E402
+from gtab.io.export import save_json, save_midi, save_stems, synthesize_wav  # noqa: E402
 from gtab.pipeline import build_default_pipeline  # noqa: E402
 from gtab.types import TranscriptionResult  # noqa: E402
 
@@ -66,6 +66,15 @@ def main() -> None:
         metavar="PATH",
         help="Save a piano-roll PNG (notes over the guitar stem's CQT) to PATH",
     )
+    parser.add_argument(
+        "--midi", default=None, metavar="PATH", help="Export the notes as a MIDI file"
+    )
+    parser.add_argument(
+        "--synth",
+        default=None,
+        metavar="PATH",
+        help="Render the notes to a playable WAV (sine synth, native playback)",
+    )
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -79,6 +88,16 @@ def main() -> None:
 
     print_notes(output.transcription)
     print(f"\nWrote {len(output.transcription.notes)} notes -> {notes_path}")
+
+    if args.midi:
+        os.makedirs(os.path.dirname(os.path.abspath(args.midi)), exist_ok=True)
+        save_midi(output.transcription, args.midi)
+        print(f"Wrote MIDI -> {args.midi}")
+
+    if args.synth:
+        os.makedirs(os.path.dirname(os.path.abspath(args.synth)), exist_ok=True)
+        synthesize_wav(output.transcription, args.synth)
+        print(f"Wrote synthesized audio -> {args.synth}  (play: afplay {args.synth})")
 
     if args.plot:
         import matplotlib

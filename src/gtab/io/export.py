@@ -20,6 +20,8 @@ def transcription_to_dict(result: TranscriptionResult) -> dict:
                 "offset": n.note.offset,
                 "pitch_midi": n.note.pitch_midi,
                 "confidence": n.note.confidence,
+                "string": n.note.string,
+                "fret": n.note.fret,
                 "techniques": [t.value for t in n.techniques],
             }
             for n in result.notes
@@ -32,13 +34,14 @@ def save_json(result: TranscriptionResult, path: str) -> None:
         json.dump(transcription_to_dict(result), f, indent=2)
 
 
-def save_midi(result: TranscriptionResult, path: str) -> None:
-    """Export notes to a MIDI file for quick listening / DAW import."""
+def transcription_to_pretty_midi(result: TranscriptionResult):
+    """Build a pretty_midi.PrettyMIDI from a result (one steel-guitar track)."""
     try:
         import pretty_midi
     except ImportError as e:
         raise ImportError(
-            "pretty_midi is required for MIDI export. Install with: pip install pretty_midi"
+            "pretty_midi is required for MIDI export/synthesis. "
+            "Install with: pip install 'gtab[midi]' (or pip install pretty_midi)"
         ) from e
 
     pm = pretty_midi.PrettyMIDI()
@@ -53,7 +56,23 @@ def save_midi(result: TranscriptionResult, path: str) -> None:
             )
         )
     pm.instruments.append(inst)
-    pm.write(path)
+    return pm
+
+
+def save_midi(result: TranscriptionResult, path: str) -> None:
+    """Export notes to a MIDI file for quick listening / DAW import."""
+    transcription_to_pretty_midi(result).write(path)
+
+
+def synthesize_wav(result: TranscriptionResult, path: str, fs: int = 44100) -> None:
+    """Render the notes to a playable WAV using pretty_midi's built-in sine
+    synthesizer -- no external synth/soundfont needed, so playback is native
+    (e.g. `afplay`). Good enough to audition the transcription."""
+    import soundfile as sf
+
+    pm = transcription_to_pretty_midi(result)
+    audio = pm.synthesize(fs=fs)  # pure-numpy sine synthesis
+    sf.write(path, audio, fs)
 
 
 def save_stems(output: PipelineOutput, out_dir: str) -> None:
