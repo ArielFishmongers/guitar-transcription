@@ -13,4 +13,5 @@ models/
 *.mp3
 *.flac
 *.m4a
+*.zip
 .DS_Store

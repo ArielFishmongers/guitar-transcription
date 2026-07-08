@@ -141,3 +141,5 @@ The user will research methods per stage with web search, then ask you to
 implement the chosen one. Until then, leave stubs in place and do not guess at
 algorithms. When implementing: wire the method, keep the interface identical,
 and add a small evaluation script under `scripts/` so methods are comparable.
+
+For Stage 3 rev B, read docs/SPEC_transcription_fretnet.md
