@@ -38,12 +38,22 @@ STRICTNESSES = ("onset", "onset_offset", "onset_offset_pitch")
 
 
 def notedata_to_transcription(note_data) -> TranscriptionResult:
-    """mirdata NoteData (intervals in s, pitches in Hz) -> TranscriptionResult."""
+    """mirdata NoteData -> TranscriptionResult.
+
+    Respects `note_data.pitch_unit`: GuitarSet stores pitches in MIDI (its JAMS
+    uses the note_midi namespace); other datasets may use Hz.
+    """
+    unit = (note_data.pitch_unit or "hz").lower()
     notes = []
-    for (onset, offset), hz in zip(note_data.intervals, note_data.pitches):
-        if hz <= 0:
-            continue
-        pitch_midi = 69.0 + 12.0 * math.log2(hz / 440.0)
+    for (onset, offset), pitch in zip(note_data.intervals, note_data.pitches):
+        if unit == "midi":
+            pitch_midi = float(pitch)
+        elif unit == "hz":
+            if pitch <= 0:
+                continue
+            pitch_midi = 69.0 + 12.0 * math.log2(pitch / 440.0)
+        else:
+            raise ValueError(f"Unsupported pitch unit: {note_data.pitch_unit!r}")
         notes.append(
             AnnotatedNote(
                 note=NoteEvent(onset=float(onset), offset=float(offset), pitch_midi=pitch_midi)
