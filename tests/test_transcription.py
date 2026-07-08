@@ -16,7 +16,9 @@ from gtab.stages.fretnet_client import FretNetClient, FretNetPrediction
 from gtab.stages.transcription import (
     OPEN_STRING_MIDI,
     FusionTranscriber,
+    _BP_FRAME_HOP_S,
     assign_string_fret,
+    pitch_bends_to_contour,
 )
 from gtab.types import AnnotatedNote, AudioBuffer, NoteEvent, TranscriptionResult
 
@@ -87,6 +89,49 @@ def test_assign_frame_window_and_nearest_fallback():
     assert assign_string_fret(45, 0.9, 1.1, mp, times) == (1, 0)
     # window past the last frame -> nearest-frame fallback picks frame 2
     assert assign_string_fret(45, 5.0, 5.1, mp, times) == (1, 0)
+
+
+# --------------------------------------------------------------------------- #
+# Pitch-contour helper + beat tracking (numpy/librosa only -- librosa is core)
+# --------------------------------------------------------------------------- #
+
+def test_pitch_bends_to_contour_folds_bins_into_midi():
+    # 3 contour bins == 1 semitone: 0->+0, 3->+1, -3->-1.
+    contour = pitch_bends_to_contour(1.0, 52.0, [0, 3, -3])
+    assert contour is not None and len(contour) == 3
+    pitches = [p for _, p in contour]
+    times = [t for t, _ in contour]
+    assert pitches == [52.0, 53.0, 51.0]
+    assert abs(times[0] - 1.0) < 1e-9
+    assert abs(times[1] - (1.0 + _BP_FRAME_HOP_S)) < 1e-9
+
+
+def test_pitch_bends_to_contour_empty_is_none():
+    assert pitch_bends_to_contour(0.0, 40.0, None) is None
+    assert pitch_bends_to_contour(0.0, 40.0, []) is None
+
+
+def test_estimate_beats_on_click_track():
+    import librosa
+
+    from gtab.rhythm import estimate_beats
+
+    sr, bpm, dur = 22050, 120.0, 8.0
+    period = 60.0 / bpm
+    y = librosa.clicks(
+        times=np.arange(0.0, dur, period), sr=sr, length=int(sr * dur)
+    ).astype(np.float32)
+    tempo, beats = estimate_beats(AudioBuffer(samples=y, sample_rate=sr))
+    assert tempo is not None and tempo > 0
+    assert len(beats) > 3 and beats == sorted(beats)
+
+
+def test_estimate_beats_short_audio_returns_empty():
+    from gtab.rhythm import estimate_beats
+
+    y = np.zeros(1000, dtype=np.float32)  # < 0.5 s -> not enough for a tempo
+    tempo, beats = estimate_beats(AudioBuffer(samples=y, sample_rate=22050))
+    assert tempo is None and beats == []
 
 
 # --------------------------------------------------------------------------- #

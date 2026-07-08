@@ -53,10 +53,12 @@ def _build_transcriber(cfg: dict[str, Any]):
     tr_cfg = cfg.get("transcription", {})
     impl = tr_cfg.get("impl", "basic_pitch")
     cls = TRANSCRIBERS[impl]
+    track_beats = bool(tr_cfg.get("track_beats", True))
     if impl == "basic_pitch":
         return cls(
             onset_threshold=float(tr_cfg.get("onset_threshold", 0.5)),
             frame_threshold=float(tr_cfg.get("frame_threshold", 0.3)),
+            track_beats=track_beats,
         )
     if impl in ("fretnet", "fusion"):
         if "checkpoint" not in tr_cfg:
@@ -66,6 +68,7 @@ def _build_transcriber(cfg: dict[str, Any]):
             )
         common = dict(
             checkpoint=tr_cfg["checkpoint"],
+            track_beats=track_beats,
             fretnet_python=tr_cfg.get("fretnet_python"),
             worker_script=tr_cfg.get("worker_script"),
             muda_stub=tr_cfg.get("muda_stub"),

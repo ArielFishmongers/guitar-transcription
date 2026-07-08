@@ -12,6 +12,7 @@ transcription:
   impl: basic_pitch        # stub | basic_pitch | fretnet | fusion
   onset_threshold: 0.5     # basic_pitch / fusion: Basic Pitch note-onset gate
   frame_threshold: 0.3     # basic_pitch / fusion: Basic Pitch frame gate
+  track_beats: true        # estimate tempo_bpm + beat times (librosa)
   # --- fretnet | fusion only (FretNet runs in the separate `fretnet-repro` env) ---
   # checkpoint: /path/to/FretNet/model-2500.pt   # required for fretnet/fusion
   # fretnet_python: /opt/miniconda3/envs/fretnet-repro/bin/python  # default

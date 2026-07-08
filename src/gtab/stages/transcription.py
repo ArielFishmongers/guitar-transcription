@@ -22,6 +22,43 @@ class StubTranscriber(Transcriber):
         return TranscriptionResult(notes=[])
 
 
+# Basic Pitch contour geometry: per-frame bend is an integer offset (in contour
+# bins) from the nominal pitch; 3 bins == 1 semitone. Frames are spaced by the
+# model's FFT hop over its 22050 Hz analysis rate.
+_BP_FRAME_HOP_S = 256 / 22050
+_BP_CONTOUR_BINS_PER_SEMITONE = 3
+
+
+def pitch_bends_to_contour(
+    onset: float, pitch_midi: float, bends
+) -> list[tuple[float, float]] | None:
+    """Basic Pitch per-frame pitch bends -> a pitch_contour for a note.
+
+    `bends` is Basic Pitch's per-frame bend (contour-bin offset from the nominal
+    pitch). Returns [(time_seconds, midi_pitch), ...] with the bend folded into
+    absolute MIDI, or None when no bend data is available.
+    """
+    if not bends:
+        return None
+    return [
+        (
+            onset + i * _BP_FRAME_HOP_S,
+            pitch_midi + b / _BP_CONTOUR_BINS_PER_SEMITONE,
+        )
+        for i, b in enumerate(bends)
+    ]
+
+
+def _maybe_beats(guitar: AudioBuffer, enabled: bool):
+    """(tempo_bpm, beats|None) from a shared beat tracker, or (None, None)."""
+    if not enabled:
+        return None, None
+    from gtab.rhythm import estimate_beats
+
+    tempo_bpm, beat_times = estimate_beats(guitar)
+    return tempo_bpm, (beat_times or None)
+
+
 class BasicPitchTranscriber(Transcriber):
     """Baseline transcription using Spotify's Basic Pitch.
 
@@ -36,10 +73,14 @@ class BasicPitchTranscriber(Transcriber):
     """
 
     def __init__(
-        self, onset_threshold: float = 0.5, frame_threshold: float = 0.3
+        self,
+        onset_threshold: float = 0.5,
+        frame_threshold: float = 0.3,
+        track_beats: bool = True,
     ) -> None:
         self.onset_threshold = onset_threshold
         self.frame_threshold = frame_threshold
+        self.track_beats = track_beats
 
     def transcribe(self, guitar: AudioBuffer) -> TranscriptionResult:
         try:
@@ -74,6 +115,7 @@ class BasicPitchTranscriber(Transcriber):
         for ev in note_events:
             # note_events tuple: (start_s, end_s, pitch_midi, amplitude, pitch_bends)
             start_s, end_s, pitch, amplitude = ev[0], ev[1], ev[2], ev[3]
+            bends = ev[4] if len(ev) > 4 else None
             notes.append(
                 AnnotatedNote(
                     note=NoteEvent(
@@ -81,11 +123,15 @@ class BasicPitchTranscriber(Transcriber):
                         offset=float(end_s),
                         pitch_midi=float(pitch),
                         confidence=float(amplitude),
+                        pitch_contour=pitch_bends_to_contour(
+                            float(start_s), float(pitch), bends
+                        ),
                     )
                 )
             )
         notes.sort(key=lambda n: n.note.onset)
-        return TranscriptionResult(notes=notes)
+        tempo_bpm, beats = _maybe_beats(guitar, self.track_beats)
+        return TranscriptionResult(notes=notes, tempo_bpm=tempo_bpm, beats=beats)
 
 
 # Standard-tuning open-string MIDI by string index (0 = low E ... 5 = high E).
@@ -202,6 +248,7 @@ class FretNetTranscriber(Transcriber):
         self,
         checkpoint: str | None = None,
         *,
+        track_beats: bool = True,
         fretnet_python: str | None = None,
         worker_script: str | None = None,
         muda_stub: str | None = None,
@@ -209,6 +256,7 @@ class FretNetTranscriber(Transcriber):
         client=None,
     ) -> None:
         self.checkpoint = checkpoint
+        self.track_beats = track_beats
         self._client = _build_fretnet_client(
             checkpoint,
             client=client,
@@ -234,7 +282,8 @@ class FretNetTranscriber(Transcriber):
             for n in pred.notes
         ]
         notes.sort(key=lambda n: n.note.onset)
-        return TranscriptionResult(notes=notes)
+        tempo_bpm, beats = _maybe_beats(guitar, self.track_beats)
+        return TranscriptionResult(notes=notes, tempo_bpm=tempo_bpm, beats=beats)
 
 
 class FusionTranscriber(Transcriber):
@@ -257,13 +306,14 @@ class FusionTranscriber(Transcriber):
         onset_threshold: float = 0.5,
         frame_threshold: float = 0.3,
         gate: float = 0.05,
+        track_beats: bool = True,
         fretnet_python: str | None = None,
         worker_script: str | None = None,
         muda_stub: str | None = None,
         timeout_s: int = 600,
         client=None,
     ) -> None:
-        self.bp = BasicPitchTranscriber(onset_threshold, frame_threshold)
+        self.bp = BasicPitchTranscriber(onset_threshold, frame_threshold, track_beats)
         self.gate = gate
         self._client = _build_fretnet_client(
             checkpoint,
