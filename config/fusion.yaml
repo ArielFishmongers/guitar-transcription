@@ -10,7 +10,8 @@ transcription:
   impl: fusion             # Basic Pitch notes + FretNet string/fret
   onset_threshold: 0.5
   frame_threshold: 0.3
-  gate: 0.0                # withhold string/fret below this FretNet activation
+  gate: 0.05               # withhold string/fret below this FretNet activation
+                           # (0.05 recovers TDR 0.79->0.83 for ~5% coverage loss on player-0)
   # Machine-specific: the trained FretNet checkpoint lives outside the repo.
   checkpoint: /Users/ariel/Documents/Personal Projects/fretnet-repro/guitar-transcription-continuous/generated/experiments/FretNet_GuitarSetPlus_HCQT_X/models/fold-0/model-2500.pt
   # fretnet_python: /opt/miniconda3/envs/fretnet-repro/bin/python   # default

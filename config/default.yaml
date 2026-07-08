@@ -17,7 +17,7 @@ transcription:
   # fretnet_python: /opt/miniconda3/envs/fretnet-repro/bin/python  # default
   # worker_script:                               # default: scripts/fretnet_worker.py
   # muda_stub:                                   # default: vendor/fretnet_stubs
-  # gate: 0.0              # fusion: withhold string/fret below this activation
+  # gate: 0.05             # fusion: withhold string/fret below this activation (default 0.05)
   # timeout_s: 600
 
 techniques:

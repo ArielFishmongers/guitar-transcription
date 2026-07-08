@@ -256,7 +256,7 @@ class FusionTranscriber(Transcriber):
         *,
         onset_threshold: float = 0.5,
         frame_threshold: float = 0.3,
-        gate: float = 0.0,
+        gate: float = 0.05,
         fretnet_python: str | None = None,
         worker_script: str | None = None,
         muda_stub: str | None = None,

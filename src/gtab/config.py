@@ -75,7 +75,7 @@ def _build_transcriber(cfg: dict[str, Any]):
             return cls(
                 onset_threshold=float(tr_cfg.get("onset_threshold", 0.5)),
                 frame_threshold=float(tr_cfg.get("frame_threshold", 0.3)),
-                gate=float(tr_cfg.get("gate", 0.0)),
+                gate=float(tr_cfg.get("gate", 0.05)),
                 **common,
             )
         return cls(**common)
