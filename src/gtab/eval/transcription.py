@@ -73,3 +73,56 @@ def note_f1(
         "onset_offset": float(onset_offset_f1),
         "onset_offset_pitch": float(full_f1),
     }
+
+
+def tab_disambiguation_rate(
+    ref: TranscriptionResult,
+    est: TranscriptionResult,
+    onset_tolerance: float = ONSET_TOLERANCE,
+    pitch_tolerance: float = 50.0,
+) -> dict[str, float]:
+    """Note-level tablature disambiguation rate (TDR).
+
+    Of the correctly-detected pitches (est notes matched to ref notes on onset +
+    pitch), the fraction assigned to the CORRECT string. This is the metric that
+    decides whether string output is trustworthy downstream.
+
+    Both `ref` and `est` must carry `string`. Est notes with `string is None`
+    (withheld/unassigned) are excluded from the rate but surfaced via coverage
+    counts. When every matched est note carries a string, `tdr` equals the
+    standard FretNet/Wiggins TDR (num_correct_tablature / num_correct_pitch).
+
+    Returns {tdr, n_matched, n_with_string, n_ref, n_est}.
+    """
+    import mir_eval
+
+    ref_i, ref_p = _to_intervals_pitches(ref)
+    est_i, est_p = _to_intervals_pitches(est)
+    n_ref, n_est = len(ref_i), len(est_i)
+    if n_ref == 0 or n_est == 0:
+        return {"tdr": 0.0, "n_matched": 0, "n_with_string": 0, "n_ref": n_ref, "n_est": n_est}
+
+    ref_strings = [n.note.string for n in ref.notes]
+    est_strings = [n.note.string for n in est.notes]
+
+    # onset + pitch match (offset_ratio=None) == the "correctly-detected pitches".
+    matches = mir_eval.transcription.match_notes(
+        ref_i, ref_p, est_i, est_p,
+        onset_tolerance=onset_tolerance,
+        pitch_tolerance=pitch_tolerance,
+        offset_ratio=None,
+    )
+    with_string = [
+        (ri, ei)
+        for ri, ei in matches
+        if est_strings[ei] is not None and ref_strings[ri] is not None
+    ]
+    correct = sum(1 for ri, ei in with_string if est_strings[ei] == ref_strings[ri])
+    tdr = correct / len(with_string) if with_string else 0.0
+    return {
+        "tdr": float(tdr),
+        "n_matched": int(len(matches)),
+        "n_with_string": int(len(with_string)),
+        "n_ref": int(n_ref),
+        "n_est": int(n_est),
+    }

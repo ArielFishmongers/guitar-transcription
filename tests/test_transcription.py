@@ -6,6 +6,7 @@ client, so they always run. The heavy integration tests (real FretNet subprocess
 in the `fretnet-repro` env on a GuitarSet clip) are skipped unless that env, a
 checkpoint, and a clip are all present.
 """
+import importlib.util
 import os
 
 import numpy as np
@@ -149,6 +150,41 @@ def test_fusion_empty_notes_skips_fretnet():
     fus.bp = _FakeBP([])
     out = fus.transcribe(AudioBuffer(samples=np.zeros(10, np.float32), sample_rate=22050))
     assert out.notes == []
+
+
+# --------------------------------------------------------------------------- #
+# Note-level TDR metric (needs mir_eval)
+# --------------------------------------------------------------------------- #
+
+_mir_eval = importlib.util.find_spec("mir_eval") is not None
+
+
+def _note(onset, pitch, string):
+    return AnnotatedNote(
+        note=NoteEvent(onset=onset, offset=onset + 0.2, pitch_midi=pitch, string=string)
+    )
+
+
+@pytest.mark.skipif(not _mir_eval, reason="mir_eval not installed")
+def test_tdr_perfect_match_is_one():
+    from gtab.eval.transcription import tab_disambiguation_rate
+
+    ref = TranscriptionResult(notes=[_note(0.0, 45, 1), _note(0.5, 52, 2)])
+    r = tab_disambiguation_rate(ref, ref)
+    assert r["tdr"] == 1.0
+    assert r["n_matched"] == 2 and r["n_with_string"] == 2
+
+
+@pytest.mark.skipif(not _mir_eval, reason="mir_eval not installed")
+def test_tdr_wrong_string_drops_below_one():
+    from gtab.eval.transcription import tab_disambiguation_rate
+
+    ref = TranscriptionResult(notes=[_note(0.0, 45, 1), _note(0.5, 52, 2)])
+    # Same pitches/onsets (so both match), but the second note's string is wrong.
+    est = TranscriptionResult(notes=[_note(0.0, 45, 1), _note(0.5, 52, 3)])
+    r = tab_disambiguation_rate(ref, est)
+    assert r["n_matched"] == 2 and r["n_with_string"] == 2
+    assert r["tdr"] == 0.5
 
 
 # --------------------------------------------------------------------------- #
