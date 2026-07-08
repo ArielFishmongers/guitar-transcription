@@ -7,6 +7,10 @@ to benchmark alternatives against during the research phase, not a final choice.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+import numpy as np
+
 from gtab.stages.base import Transcriber
 from gtab.types import AnnotatedNote, AudioBuffer, NoteEvent, TranscriptionResult
 
@@ -57,7 +61,11 @@ class BasicPitchTranscriber(Transcriber):
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                 tmp_path = tmp.name
             sf.write(tmp_path, guitar.samples, guitar.sample_rate)
-            _model_output, _midi_data, note_events = predict(tmp_path)
+            _model_output, _midi_data, note_events = predict(
+                tmp_path,
+                onset_threshold=self.onset_threshold,
+                frame_threshold=self.frame_threshold,
+            )
         finally:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
@@ -78,3 +86,227 @@ class BasicPitchTranscriber(Transcriber):
             )
         notes.sort(key=lambda n: n.note.onset)
         return TranscriptionResult(notes=notes)
+
+
+# Standard-tuning open-string MIDI by string index (0 = low E ... 5 = high E).
+OPEN_STRING_MIDI: tuple[int, ...] = (40, 45, 50, 55, 59, 64)
+
+
+def assign_string_fret(
+    pitch_midi: float,
+    onset: float,
+    offset: float,
+    multi_pitch: np.ndarray,
+    times: np.ndarray,
+    open_string_midi: Sequence[int] = OPEN_STRING_MIDI,
+    profile_low: int = 40,
+    num_frets: int = 19,
+    gate: float = 0.0,
+) -> tuple[int | None, int | None]:
+    """Assign a (string, fret) to one note from FretNet's per-frame activation.
+
+    This is the core of the fusion transcriber, kept as a pure numpy function so
+    it is unit-testable without any heavy deps. It reads FretNet's per-string,
+    per-pitch activation over the note's time window and picks the string whose
+    activation is strongest -- among only the strings that can *physically* play
+    the pitch in standard tuning.
+
+    Args:
+        pitch_midi: the note's pitch (rounded to nearest semitone for the lookup).
+        onset, offset: note bounds in seconds (same clock as ``times``).
+        multi_pitch: FretNet activation, shape (S strings, B pitch-bins, F frames);
+            bin ``b`` corresponds to MIDI ``profile_low + b``.
+        times: (F,) frame times in seconds.
+        open_string_midi: open-string MIDI per string index (0 = low E).
+        profile_low: MIDI of pitch-bin 0.
+        num_frets: highest fret the model represents (FretNet: 19).
+        gate: withhold (return None) if the winning string's activation is below
+            this. Default 0.0 = always assign when a valid string exists.
+
+    Returns:
+        ``(string, fret)`` or ``(None, None)`` when the pitch is outside the
+        model's bin range, no string can physically play it, or the best
+        activation is below ``gate``.
+    """
+    p = int(round(pitch_midi))
+    b = p - profile_low
+    if b < 0 or b >= multi_pitch.shape[1]:
+        return None, None
+
+    frames = np.nonzero((times >= onset) & (times <= offset))[0]
+    if frames.size == 0:  # note falls between frames -> use the nearest one
+        frames = np.array([int(np.argmin(np.abs(times - onset)))])
+
+    scores = multi_pitch[:, b, frames].mean(axis=1)  # (S,)
+
+    # A string can play pitch p iff the implied fret is on the fretboard.
+    valid = np.array(
+        [0 <= (p - m) <= num_frets for m in open_string_midi], dtype=bool
+    )
+    if not valid.any():
+        return None, None
+
+    string = int(np.argmax(np.where(valid, scores, -np.inf)))
+    if scores[string] < gate:
+        return None, None
+    return string, p - int(open_string_midi[string])
+
+
+def _build_fretnet_client(
+    checkpoint: str | None,
+    *,
+    client=None,
+    fretnet_python: str | None = None,
+    worker_script: str | None = None,
+    muda_stub: str | None = None,
+    timeout_s: int = 600,
+):
+    """Construct a FretNetClient, forwarding only the params the caller set so
+    the client keeps its own defaults. `client` (an already-built client or a
+    test double) short-circuits construction."""
+    if client is not None:
+        return client
+    if not checkpoint:
+        raise ValueError(
+            "A FretNet `checkpoint` path is required "
+            "(set `checkpoint:` under transcription in the config)."
+        )
+    from gtab.stages.fretnet_client import FretNetClient
+
+    kwargs = {"checkpoint": checkpoint, "timeout_s": timeout_s}
+    if fretnet_python is not None:
+        kwargs["fretnet_python"] = fretnet_python
+    if worker_script is not None:
+        kwargs["worker_script"] = worker_script
+    if muda_stub is not None:
+        kwargs["muda_stub"] = muda_stub
+    return FretNetClient(**kwargs)
+
+
+class FretNetTranscriber(Transcriber):
+    """Guitar-specific transcription via a trained FretNet checkpoint.
+
+    FretNet emits notes WITH (string, fret) and is strong on acoustic,
+    standard-tuning material (TDR ~0.90). Its research deps conflict with gtab's
+    env, so inference runs in the separate `fretnet-repro` conda env via a
+    subprocess (see `fretnet_client`); this class just adapts the returned notes.
+
+    NOTE: FretNet under-detects note onsets on out-of-domain audio (electric /
+    effected / separated), so its note *count* can collapse there even though its
+    string/fret head stays reliable. For robust note detection use
+    `FusionTranscriber`, which keeps Basic Pitch's notes and borrows only
+    FretNet's string/fret.
+    """
+
+    def __init__(
+        self,
+        checkpoint: str | None = None,
+        *,
+        fretnet_python: str | None = None,
+        worker_script: str | None = None,
+        muda_stub: str | None = None,
+        timeout_s: int = 600,
+        client=None,
+    ) -> None:
+        self.checkpoint = checkpoint
+        self._client = _build_fretnet_client(
+            checkpoint,
+            client=client,
+            fretnet_python=fretnet_python,
+            worker_script=worker_script,
+            muda_stub=muda_stub,
+            timeout_s=timeout_s,
+        )
+
+    def transcribe(self, guitar: AudioBuffer) -> TranscriptionResult:
+        pred = self._client.run(guitar)
+        notes = [
+            AnnotatedNote(
+                note=NoteEvent(
+                    onset=float(n["onset"]),
+                    offset=float(n["offset"]),
+                    pitch_midi=float(n["pitch_midi"]),
+                    confidence=1.0,
+                    string=n["string"],
+                    fret=n["fret"],
+                )
+            )
+            for n in pred.notes
+        ]
+        notes.sort(key=lambda n: n.note.onset)
+        return TranscriptionResult(notes=notes)
+
+
+class FusionTranscriber(Transcriber):
+    """Basic Pitch notes + FretNet string/fret.
+
+    Basic Pitch is the stronger, domain-robust note detector; FretNet uniquely
+    predicts the fretboard. This transcriber keeps Basic Pitch's notes verbatim
+    and, for each one, looks up a (string, fret) from FretNet's per-frame
+    tablature activation (`assign_string_fret`) -- pairing each model to its
+    strength and sidestepping FretNet's fragile onset head.
+
+    String/fret out of FretNet's acoustic-GuitarSet domain are not yet validated
+    (see the plan's follow-up); `gate` can withhold low-confidence assignments.
+    """
+
+    def __init__(
+        self,
+        checkpoint: str | None = None,
+        *,
+        onset_threshold: float = 0.5,
+        frame_threshold: float = 0.3,
+        gate: float = 0.0,
+        fretnet_python: str | None = None,
+        worker_script: str | None = None,
+        muda_stub: str | None = None,
+        timeout_s: int = 600,
+        client=None,
+    ) -> None:
+        self.bp = BasicPitchTranscriber(onset_threshold, frame_threshold)
+        self.gate = gate
+        self._client = _build_fretnet_client(
+            checkpoint,
+            client=client,
+            fretnet_python=fretnet_python,
+            worker_script=worker_script,
+            muda_stub=muda_stub,
+            timeout_s=timeout_s,
+        )
+
+    def transcribe(self, guitar: AudioBuffer) -> TranscriptionResult:
+        bp_result = self.bp.transcribe(guitar)
+        if not bp_result.notes:
+            return bp_result  # no notes -> nothing to localise, skip the subprocess
+
+        pred = self._client.run(guitar)
+        notes: list[AnnotatedNote] = []
+        for an in bp_result.notes:
+            n = an.note
+            string, fret = assign_string_fret(
+                n.pitch_midi,
+                n.onset,
+                n.offset,
+                pred.multi_pitch,
+                pred.times,
+                pred.open_string_midi,
+                pred.profile_low,
+                gate=self.gate,
+            )
+            notes.append(
+                AnnotatedNote(
+                    note=NoteEvent(
+                        onset=n.onset,
+                        offset=n.offset,
+                        pitch_midi=n.pitch_midi,  # keep Basic Pitch's float (bend info)
+                        confidence=n.confidence,
+                        pitch_contour=n.pitch_contour,
+                        string=string,
+                        fret=fret,
+                    ),
+                    techniques=an.techniques,
+                )
+            )
+        return TranscriptionResult(
+            notes=notes, tempo_bpm=bp_result.tempo_bpm, beats=bp_result.beats
+        )

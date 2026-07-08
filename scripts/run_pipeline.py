@@ -58,6 +58,13 @@ def main() -> None:
     parser.add_argument("--out", default="data/interim/run", help="Output directory")
     parser.add_argument("--sr", type=int, default=22050, help="Target sample rate")
     parser.add_argument(
+        "--config",
+        default=None,
+        metavar="PATH",
+        help="YAML config selecting stage impls (e.g. transcription.impl=fusion). "
+        "Without this, the built-in default pipeline (basic_pitch) runs.",
+    )
+    parser.add_argument(
         "--stems", action="store_true", help="Also export WAV stems (guitar + backing)"
     )
     parser.add_argument(
@@ -78,7 +85,12 @@ def main() -> None:
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
-    pipeline = build_default_pipeline()
+    if args.config:
+        from gtab.config import build_pipeline_from_config, load_config
+
+        pipeline = build_pipeline_from_config(load_config(args.config))
+    else:
+        pipeline = build_default_pipeline()
     output = pipeline.run(args.audio, target_sr=args.sr)
 
     notes_path = os.path.join(args.out, "notes.json")

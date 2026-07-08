@@ -9,9 +9,16 @@ separation:
   shifts: 1                # demucs test-time shifts: higher = better but slower
 
 transcription:
-  impl: basic_pitch        # stub | basic_pitch
-  onset_threshold: 0.5
-  frame_threshold: 0.3
+  impl: basic_pitch        # stub | basic_pitch | fretnet | fusion
+  onset_threshold: 0.5     # basic_pitch / fusion: Basic Pitch note-onset gate
+  frame_threshold: 0.3     # basic_pitch / fusion: Basic Pitch frame gate
+  # --- fretnet | fusion only (FretNet runs in the separate `fretnet-repro` env) ---
+  # checkpoint: /path/to/FretNet/model-2500.pt   # required for fretnet/fusion
+  # fretnet_python: /opt/miniconda3/envs/fretnet-repro/bin/python  # default
+  # worker_script:                               # default: scripts/fretnet_worker.py
+  # muda_stub:                                   # default: vendor/fretnet_stubs
+  # gate: 0.0              # fusion: withhold string/fret below this activation
+  # timeout_s: 600
 
 techniques:
   impl: noop               # noop | contour

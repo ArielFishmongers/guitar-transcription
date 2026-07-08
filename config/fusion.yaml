@@ -1,0 +1,23 @@
+# Fusion transcription: Basic Pitch notes + FretNet string/fret.
+# Run:  python scripts/run_pipeline.py <guitar.wav> --config config/fusion.yaml --out <dir>
+# Requires the separate `fretnet-repro` conda env (see scripts/fretnet_worker.py).
+sample_rate: 22050
+
+separation:
+  impl: passthrough        # input is already isolated guitar
+
+transcription:
+  impl: fusion             # Basic Pitch notes + FretNet string/fret
+  onset_threshold: 0.5
+  frame_threshold: 0.3
+  gate: 0.0                # withhold string/fret below this FretNet activation
+  # Machine-specific: the trained FretNet checkpoint lives outside the repo.
+  checkpoint: /Users/ariel/Documents/Personal Projects/fretnet-repro/guitar-transcription-continuous/generated/experiments/FretNet_GuitarSetPlus_HCQT_X/models/fold-0/model-2500.pt
+  # fretnet_python: /opt/miniconda3/envs/fretnet-repro/bin/python   # default
+
+techniques:
+  impl: noop
+
+export:
+  stems: false
+  midi: false
