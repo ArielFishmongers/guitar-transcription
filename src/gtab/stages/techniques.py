@@ -14,6 +14,7 @@ from __future__ import annotations
 import numpy as np
 
 from gtab.stages.base import TechniqueDetector
+from gtab.stages.transcription import _build_fretnet_client
 from gtab.types import AnnotatedNote, AudioBuffer, Technique, TranscriptionResult
 
 
@@ -278,6 +279,102 @@ class LearnedTechniqueDetector(TechniqueDetector):
 
         out = [AnnotatedNote(note=an.note, techniques=techs[i])
                for i, an in enumerate(result.notes)]
+        return TranscriptionResult(
+            notes=out, tempo_bpm=result.tempo_bpm, beats=result.beats
+        )
+
+
+# --- Route A: per-string F0 glide detection (bend/slide) ---------------------
+_GLIDE_MIN_CENTS = 70.0      # min per-string F0 excursion to be a glide (NO floor ~18c;
+# tuned on IDMT: bend P/R/F1 ~0.39/0.36/0.38 given correct notes/strings)
+_GLIDE_SLIDE_NET_CENTS = 90.0  # net start->end change to call it a slide vs bend
+_GLIDE_MIN_MONOTONIC = 0.6
+
+
+def detect_glide(
+    f0_midi,
+    *,
+    min_glide_cents: float = _GLIDE_MIN_CENTS,
+    slide_net_cents: float = _GLIDE_SLIDE_NET_CENTS,
+    min_monotonic: float = _GLIDE_MIN_MONOTONIC,
+):
+    """Tag a bend or slide from one note's per-string F0 (MIDI, NaN-gapped).
+
+    A per-string F0 is monophonic, so the note's window contains only that note --
+    excursion reflects the intra-note pitch gesture, not note-to-note transitions.
+    Returns Technique.SLIDE (large, mostly-monotonic net glide to a new pitch),
+    Technique.BEND (a smaller/returning deviation), or None (no glide). Pure numpy.
+    """
+    m = np.asarray(f0_midi, dtype=float)
+    m = m[~np.isnan(m)]
+    if m.size < 3:
+        return None
+    excursion = (m.max() - m.min()) * 100.0
+    if excursion < min_glide_cents:
+        return None
+    net = abs(m[-1] - m[0]) * 100.0
+    dsign = np.sign(np.diff(m))
+    dsign = dsign[dsign != 0]
+    monotonic = abs(dsign.sum()) / dsign.size if dsign.size else 0.0
+    if net >= slide_net_cents and monotonic >= min_monotonic:
+        return Technique.SLIDE
+    return Technique.BEND
+
+
+class PerStringGlideDetector(TechniqueDetector):
+    """Detect bend/slide from FretNet's per-string continuous F0 (Route A).
+
+    FretNet decomposes the (polyphonic) guitar into 6 monophonic per-string F0
+    streams; a note's window on its own string contains only that note, so the
+    pitch glide of a bend/slide is visible (unlike a polyphonic contour, where
+    note-to-note transitions swamp it). Requires the transcription result's notes
+    to carry a `string` (i.e. run with the fusion/fretnet transcriber). Runs its
+    own FretNet inference via the subprocess client; VIBRATO is out of scope here
+    (FretNet's F0 is too smooth for oscillation).
+    """
+
+    def __init__(
+        self,
+        checkpoint: str | None = None,
+        *,
+        min_glide_cents: float = _GLIDE_MIN_CENTS,
+        slide_net_cents: float = _GLIDE_SLIDE_NET_CENTS,
+        min_monotonic: float = _GLIDE_MIN_MONOTONIC,
+        fretnet_python: str | None = None,
+        worker_script: str | None = None,
+        muda_stub: str | None = None,
+        timeout_s: int = 600,
+        client=None,
+    ) -> None:
+        self.min_glide_cents = min_glide_cents
+        self.slide_net_cents = slide_net_cents
+        self.min_monotonic = min_monotonic
+        self._client = _build_fretnet_client(
+            checkpoint, client=client, fretnet_python=fretnet_python,
+            worker_script=worker_script, muda_stub=muda_stub, timeout_s=timeout_s,
+        )
+
+    def detect(
+        self, guitar: AudioBuffer, result: TranscriptionResult
+    ) -> TranscriptionResult:
+        pred = self._client.run(guitar)
+        f0 = pred.perstring_f0
+        if f0 is None:  # worker didn't export per-string F0 -> nothing to add
+            return result
+        times = pred.times
+        out: list[AnnotatedNote] = []
+        for an in result.notes:
+            n = an.note
+            techs = list(an.techniques)
+            if n.string is not None and 0 <= n.string < f0.shape[0]:
+                seg = f0[n.string][(times >= n.onset) & (times <= n.offset)]
+                tech = detect_glide(
+                    seg, min_glide_cents=self.min_glide_cents,
+                    slide_net_cents=self.slide_net_cents, min_monotonic=self.min_monotonic,
+                )
+                if tech is not None and tech not in techs:
+                    techs.append(tech)
+            out.append(AnnotatedNote(note=n, techniques=techs))
         return TranscriptionResult(
             notes=out, tempo_bpm=result.tempo_bpm, beats=result.beats
         )

@@ -22,13 +22,16 @@ transcription:
   # timeout_s: 600
 
 techniques:
-  impl: noop               # noop | contour | learned
+  impl: noop               # noop | contour | learned | glide
   # contour = rule-based vibrato + bend from a per-note pyin F0 (weak on real audio):
   # frame_length: 1024
   # bend_min_cents: 100      # min total glide for a bend (>= 1 semitone)
   # vib_min_extent_cents: 20 # min vibrato peak-to-peak (noise floor)
   # learned = trained per-note classifier (bend/vibrato/slide/harmonic/dead_note + palm-mute):
   # model_path: models/technique_clf.joblib   # train with scripts/train_technique_classifier.py
+  # glide = bend/slide from FretNet per-string F0 (needs the same checkpoint; best in-domain acoustic):
+  # checkpoint: /path/to/FretNet/model-2500.pt
+  # min_glide_cents: 70
 
 export:
   stems: false

@@ -43,6 +43,7 @@ class FretNetPrediction:
     notes: list[dict]  # each: {onset, offset, pitch_midi, string, fret}
     multi_pitch: np.ndarray  # (6 strings, num_pitch_bins, F frames)
     times: np.ndarray  # (F,) absolute seconds
+    perstring_f0: np.ndarray | None = None  # (6, F) MIDI F0 per string, NaN where unvoiced
 
 
 @dataclass
@@ -108,6 +109,11 @@ class FretNetClient:
             # Materialise arrays before the temp dir (and the npz file) vanish.
             multi_pitch = np.asarray(arrays["multi_pitch"], dtype=np.float32).copy()
             times = np.asarray(arrays["times"], dtype=np.float32).copy()
+            perstring_f0 = (
+                np.asarray(arrays["perstring_f0"], dtype=np.float32).copy()
+                if "perstring_f0" in arrays.files
+                else None
+            )
             arrays.close()
 
         if multi_pitch.shape[2] != times.shape[0]:
@@ -125,6 +131,7 @@ class FretNetClient:
             notes=list(meta["notes"]),
             multi_pitch=multi_pitch,
             times=times,
+            perstring_f0=perstring_f0,
         )
 
     def _preflight(self, worker: str, muda_stub: str) -> None:

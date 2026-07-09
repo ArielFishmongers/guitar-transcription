@@ -118,6 +118,20 @@ def stacked_notes_to_list(stacked_notes) -> list[dict]:
     return notes
 
 
+def stacked_pitch_list_to_f0(pitch_list, num_frames: int):
+    """amt_tools per-string pitch list -> (6, F) MIDI F0 array, NaN where unvoiced.
+
+    Each string is monophonic, so we take the single voiced pitch per frame. This
+    continuous per-string F0 is the signal Stage 4 uses to detect bend/slide.
+    """
+    f0 = np.full((6, num_frames), np.nan, dtype=np.float32)
+    for s_idx, (_lbl, (_times, obs)) in enumerate(pitch_list.items()):
+        for i in range(min(num_frames, len(obs))):
+            if len(obs[i]) > 0:
+                f0[s_idx, i] = float(obs[i][0])
+    return f0
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="FretNet inference -> compact dump")
     p.add_argument("--audio", required=True, help="Input audio clip (any rate)")
@@ -139,6 +153,9 @@ def main() -> None:
         )
 
     notes = stacked_notes_to_list(predictions[tools.KEY_NOTES])
+    perstring_f0 = stacked_pitch_list_to_f0(
+        predictions[tools.KEY_PITCHLIST], times.shape[0]
+    )
     meta = {
         "schema_version": SCHEMA_VERSION,
         "sr": SR,
@@ -158,6 +175,7 @@ def main() -> None:
         os.path.join(args.out_dir, meta["arrays_file"]),
         multi_pitch=multi_pitch,
         times=times,
+        perstring_f0=perstring_f0,
     )
     with open(os.path.join(args.out_dir, "fretnet_pred.json"), "w") as f:
         json.dump(meta, f)

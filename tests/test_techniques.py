@@ -9,7 +9,13 @@ import importlib.util
 import numpy as np
 import pytest
 
-from gtab.stages.techniques import ContourTechniqueDetector, detect_contour_techniques
+from gtab.stages.fretnet_client import FretNetPrediction
+from gtab.stages.techniques import (
+    ContourTechniqueDetector,
+    PerStringGlideDetector,
+    detect_contour_techniques,
+    detect_glide,
+)
 from gtab.types import AnnotatedNote, AudioBuffer, NoteEvent, Technique, TranscriptionResult
 
 _FRAME_HOP = 256 / 22050  # matches the detector's pyin hop
@@ -123,3 +129,54 @@ def test_technique_prf_missed_detection_drops_recall():
     est = TranscriptionResult(notes=[_note(0.0, 60, [])])  # matched note, technique missed
     r = technique_prf(ref, est, Technique.BEND)
     assert r["recall"] == 0.0 and r["tp"] == 0 and r["n_ref"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# Route A: per-string glide detection (bend/slide from FretNet per-string F0)
+# --------------------------------------------------------------------------- #
+
+def test_detect_glide_bend_slide_flat():
+    bend = np.concatenate([np.linspace(60, 60.8, 8), np.full(8, 60.8)])  # deviate + hold
+    slide = np.linspace(55, 56.6, 20)                                    # large monotonic glide
+    assert detect_glide(bend) == Technique.BEND
+    assert detect_glide(slide) == Technique.SLIDE
+    assert detect_glide(np.full(20, 60.0)) is None                       # flat
+    assert detect_glide(np.linspace(60, 60.3, 10)) is None               # sub-threshold
+    assert detect_glide(np.array([60.0, np.nan, 60.6, np.nan, 61.2, 61.2])) is not None  # NaN gaps
+
+
+class _GlideClient:
+    def __init__(self, pred):
+        self._pred = pred
+
+    def run(self, guitar):
+        return self._pred
+
+
+def _pred(perstring_f0, times):
+    return FretNetPrediction(
+        sr=22050, hop=512, open_string_midi=list(range(6)), profile_low=40,
+        num_pitch_bins=44, notes=[], multi_pitch=np.zeros((6, 44, times.size), np.float32),
+        times=times.astype(np.float32), perstring_f0=perstring_f0)
+
+
+def test_perstring_glide_detector_tags_from_f0():
+    times = np.arange(10) * 0.1
+    f0 = np.full((6, 10), np.nan, dtype=np.float32)
+    f0[2, 2:8] = np.linspace(50.0, 50.9, 6)  # ~0.9-semitone rise on string 2
+    res = TranscriptionResult(notes=[
+        AnnotatedNote(note=NoteEvent(onset=0.2, offset=0.7, pitch_midi=50.0, string=2, fret=0)),
+        AnnotatedNote(note=NoteEvent(onset=0.2, offset=0.7, pitch_midi=59.0, string=4, fret=0)),
+    ])
+    out = PerStringGlideDetector(client=_GlideClient(_pred(f0, times))).detect(
+        AudioBuffer(samples=np.zeros(10, np.float32), sample_rate=22050), res)
+    # a glide (bend or slide) is detected on the voiced string, none on the silent one
+    assert set(out.notes[0].techniques) & {Technique.BEND, Technique.SLIDE}
+    assert out.notes[1].techniques == []               # string 4 unvoiced -> nothing
+
+
+def test_perstring_glide_detector_no_f0_is_noop():
+    res = TranscriptionResult(notes=[AnnotatedNote(note=NoteEvent(0.0, 0.3, 50.0, string=0))])
+    out = PerStringGlideDetector(client=_GlideClient(_pred(None, np.arange(4)))).detect(
+        AudioBuffer(samples=np.zeros(4, np.float32), sample_rate=22050), res)
+    assert out.notes[0].techniques == []

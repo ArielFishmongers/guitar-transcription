@@ -15,6 +15,7 @@ from gtab.stages.techniques import (
     ContourTechniqueDetector,
     LearnedTechniqueDetector,
     NoOpTechniqueDetector,
+    PerStringGlideDetector,
 )
 from gtab.stages.transcription import (
     BasicPitchTranscriber,
@@ -34,6 +35,7 @@ TECHNIQUES = {
     "noop": NoOpTechniqueDetector,
     "contour": ContourTechniqueDetector,
     "learned": LearnedTechniqueDetector,
+    "glide": PerStringGlideDetector,
 }
 
 
@@ -113,6 +115,23 @@ def _build_technique(cfg: dict[str, Any]):
                 "scripts/train_technique_classifier.py)."
             )
         return cls(model_path=tc["model_path"])
+    if impl == "glide":
+        if "checkpoint" not in tc:
+            raise KeyError(
+                "techniques.impl='glide' requires a 'checkpoint' (FretNet .pt) for "
+                "the per-string F0."
+            )
+        kwargs = {
+            "checkpoint": tc["checkpoint"],
+            "fretnet_python": tc.get("fretnet_python"),
+            "worker_script": tc.get("worker_script"),
+            "muda_stub": tc.get("muda_stub"),
+            "timeout_s": int(tc.get("timeout_s", 600)),
+        }
+        for k in ("min_glide_cents", "slide_net_cents", "min_monotonic"):
+            if k in tc:
+                kwargs[k] = float(tc[k])
+        return cls(**kwargs)
     return cls()
 
 

@@ -48,7 +48,8 @@ def main() -> None:
                           "track_beats": False},
     })
     detector = _build_technique({
-        "techniques": {"impl": args.technique, "model_path": args.model_path},
+        "techniques": {"impl": args.technique, "model_path": args.model_path,
+                       "checkpoint": args.checkpoint},
     })
     pairs = find_pairs(args.idmt_root, args.subset)[: args.num_clips]
     print(f"technique eval: {args.impl} + {args.technique} detector on {len(pairs)} "
