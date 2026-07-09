@@ -126,3 +126,44 @@ def tab_disambiguation_rate(
         "n_ref": int(n_ref),
         "n_est": int(n_est),
     }
+
+
+def technique_prf(
+    ref: TranscriptionResult,
+    est: TranscriptionResult,
+    technique,
+    onset_tolerance: float = ONSET_TOLERANCE,
+    pitch_tolerance: float = 50.0,
+) -> dict[str, float]:
+    """Note-level precision/recall/F1 for a single `Technique`.
+
+    A true positive is an est note tagged with the technique that matches (onset +
+    pitch) a ref note also tagged with it. Precision is over all est notes tagged
+    with the technique, recall over all ref notes tagged with it. Both `ref` and
+    `est` must carry techniques on their `AnnotatedNote`s.
+
+    Returns {precision, recall, f1, tp, n_ref, n_est, n_matched}.
+    """
+    import mir_eval
+
+    ref_i, ref_p = _to_intervals_pitches(ref)
+    est_i, est_p = _to_intervals_pitches(est)
+    ref_has = [technique in an.techniques for an in ref.notes]
+    est_has = [technique in an.techniques for an in est.notes]
+    n_ref, n_est = int(sum(ref_has)), int(sum(est_has))
+
+    if len(ref_i) == 0 or len(est_i) == 0:
+        return {"precision": 0.0, "recall": 0.0, "f1": 0.0, "tp": 0,
+                "n_ref": n_ref, "n_est": n_est, "n_matched": 0}
+
+    matches = mir_eval.transcription.match_notes(
+        ref_i, ref_p, est_i, est_p,
+        onset_tolerance=onset_tolerance, pitch_tolerance=pitch_tolerance,
+        offset_ratio=None,
+    )
+    tp = sum(1 for ri, ei in matches if ref_has[ri] and est_has[ei])
+    precision = tp / n_est if n_est else 0.0
+    recall = tp / n_ref if n_ref else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    return {"precision": float(precision), "recall": float(recall), "f1": float(f1),
+            "tp": int(tp), "n_ref": n_ref, "n_est": n_est, "n_matched": int(len(matches))}

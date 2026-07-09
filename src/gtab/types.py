@@ -64,6 +64,7 @@ class Technique(str, Enum):
     PALM_MUTE = "palm_mute"
     TAP = "tap"
     HARMONIC = "harmonic"
+    DEAD_NOTE = "dead_note"
 
 
 @dataclass

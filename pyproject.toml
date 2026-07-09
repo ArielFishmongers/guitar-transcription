@@ -22,6 +22,7 @@ transcription = ["basic-pitch>=0.3", "soundfile>=0.12"]
 # conflict with gtab), so nothing heavy is installed here. See scripts/fretnet_worker.py.
 fretnet = ["basic-pitch>=0.3", "soundfile>=0.12"]  # + a separate fretnet-repro env
 midi = ["pretty_midi>=0.2"]
+techniques = ["scikit-learn>=1.0", "joblib>=1.0"]  # learned Stage-4 technique classifier
 viz = ["matplotlib>=3.5"]
 eval = ["mir_eval>=0.7", "mirdata>=0.3"]  # note-F1 + GuitarSet ground truth
 dev = ["pytest>=7.0", "matplotlib>=3.5"]

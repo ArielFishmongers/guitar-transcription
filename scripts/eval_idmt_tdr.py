@@ -27,16 +27,28 @@ from gtab.config import _build_transcriber  # noqa: E402
 from gtab.eval.transcription import note_f1, tab_disambiguation_rate  # noqa: E402
 from gtab.stages.ingest import load_audio  # noqa: E402
 from gtab.stages.transcription import OPEN_STRING_MIDI  # noqa: E402
-from gtab.types import AnnotatedNote, NoteEvent, TranscriptionResult  # noqa: E402
+from gtab.types import AnnotatedNote, NoteEvent, Technique, TranscriptionResult  # noqa: E402
+
+# IDMT per-note label -> gtab Technique (expressionStyle + excitationStyle).
+# DN (dead-note) and NO (normal) have no Technique; PK/FS excitation are untagged.
+_IDMT_EXPRESSION = {
+    "BE": Technique.BEND, "VI": Technique.VIBRATO, "SL": Technique.SLIDE,
+    "HA": Technique.HARMONIC, "DN": Technique.DEAD_NOTE,
+}
+_IDMT_EXCITATION = {"MU": Technique.PALM_MUTE}
 
 
-def idmt_reference(xml_path: str, max_fret: int = 19) -> TranscriptionResult:
+def idmt_reference(
+    xml_path: str, max_fret: int = 19, with_techniques: bool = False
+) -> TranscriptionResult:
     """IDMT-SMT-GUITAR annotation XML -> TranscriptionResult with string/fret.
 
     `stringNumber` is 1-indexed low-E-first -> gtab index = stringNumber - 1.
-    Notes above `max_fret` (beyond FretNet's representable range) and notes whose
-    pitch is inconsistent with open+fret (bends/label noise) are dropped so the
-    number reflects string disambiguation, not an architectural fret-range cap.
+    Notes above `max_fret` and (for TDR) notes whose pitch is inconsistent with
+    open+fret are dropped. When `with_techniques`, each note also carries the
+    Technique(s) mapped from its expressionStyle/excitationStyle, and the pitch
+    vs open+fret consistency drop is skipped (a bend's pitch legitimately differs
+    from its fretted position -- dropping those would remove the notes we validate).
     """
     root = ET.parse(xml_path).getroot()
     notes: list[AnnotatedNote] = []
@@ -53,13 +65,23 @@ def idmt_reference(xml_path: str, max_fret: int = 19) -> TranscriptionResult:
         s_idx, fret, midi = int(s) - 1, int(fr), float(pitch)
         if not (0 <= s_idx <= 5) or not (0 <= fret <= max_fret):
             continue
-        if abs(round(midi) - (OPEN_STRING_MIDI[s_idx] + fret)) > 1:
-            dropped += 1  # convention mismatch / heavy bend -> skip
+        if not with_techniques and abs(round(midi) - (OPEN_STRING_MIDI[s_idx] + fret)) > 1:
+            dropped += 1  # convention mismatch / heavy bend -> skip (TDR only)
             continue
+        techs: list[Technique] = []
+        if with_techniques:
+            es, xs = txt("expressionStyle"), txt("excitationStyle")
+            if es and es.strip() in _IDMT_EXPRESSION:
+                techs.append(_IDMT_EXPRESSION[es.strip()])
+            if xs and xs.strip() in _IDMT_EXCITATION:
+                techs.append(_IDMT_EXCITATION[xs.strip()])
         notes.append(
-            AnnotatedNote(note=NoteEvent(
-                onset=float(onset), offset=float(offset), pitch_midi=midi,
-                string=s_idx, fret=fret))
+            AnnotatedNote(
+                note=NoteEvent(
+                    onset=float(onset), offset=float(offset), pitch_midi=midi,
+                    string=s_idx, fret=fret),
+                techniques=techs,
+            )
         )
     if notes and dropped > len(notes):
         raise ValueError(

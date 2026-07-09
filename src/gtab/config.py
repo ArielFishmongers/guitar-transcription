@@ -11,7 +11,11 @@ from typing import Any
 
 from gtab.pipeline import Pipeline
 from gtab.stages.separation import DemucsSeparator, PassthroughSeparator
-from gtab.stages.techniques import ContourTechniqueDetector, NoOpTechniqueDetector
+from gtab.stages.techniques import (
+    ContourTechniqueDetector,
+    LearnedTechniqueDetector,
+    NoOpTechniqueDetector,
+)
 from gtab.stages.transcription import (
     BasicPitchTranscriber,
     FretNetTranscriber,
@@ -26,7 +30,11 @@ TRANSCRIBERS = {
     "fretnet": FretNetTranscriber,
     "fusion": FusionTranscriber,
 }
-TECHNIQUES = {"noop": NoOpTechniqueDetector, "contour": ContourTechniqueDetector}
+TECHNIQUES = {
+    "noop": NoOpTechniqueDetector,
+    "contour": ContourTechniqueDetector,
+    "learned": LearnedTechniqueDetector,
+}
 
 
 def load_config(path: str) -> dict[str, Any]:
@@ -85,10 +93,32 @@ def _build_transcriber(cfg: dict[str, Any]):
     return cls()
 
 
+def _build_technique(cfg: dict[str, Any]):
+    tc = cfg.get("techniques", {})
+    impl = tc.get("impl", "noop")
+    cls = TECHNIQUES[impl]
+    if impl == "contour":
+        kwargs: dict[str, Any] = {}
+        for k in ("frame_length", "edge_trim"):
+            if k in tc:
+                kwargs[k] = int(tc[k])
+        for k in ("vib_min_extent_cents", "bend_min_cents", "bend_min_monotonic"):
+            if k in tc:
+                kwargs[k] = float(tc[k])
+        return cls(**kwargs)
+    if impl == "learned":
+        if "model_path" not in tc:
+            raise KeyError(
+                "techniques.impl='learned' requires a 'model_path' (trained via "
+                "scripts/train_technique_classifier.py)."
+            )
+        return cls(model_path=tc["model_path"])
+    return cls()
+
+
 def build_pipeline_from_config(cfg: dict[str, Any]) -> Pipeline:
-    tech_impl = cfg.get("techniques", {}).get("impl", "noop")
     return Pipeline(
         separator=_build_separator(cfg),
         transcriber=_build_transcriber(cfg),
-        technique_detector=TECHNIQUES[tech_impl](),
+        technique_detector=_build_technique(cfg),
     )
