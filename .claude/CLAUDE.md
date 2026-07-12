@@ -122,10 +122,17 @@ build it here. This pipeline's job ends at a `TranscriptionResult` of
 ## Current stage status
 
 - Stage 1 ingest: DONE (`load_audio`, librosa).
-- Stage 2 separation: baseline `PassthroughSeparator`; `DemucsSeparator` is a stub.
-- Stage 3 transcription: baseline `BasicPitchTranscriber`; needs polyphony eval +
-  beat tracking + pitch-contour passthrough.
-- Stage 4 techniques: `NoOpTechniqueDetector`; `ContourTechniqueDetector` is a stub.
+- Stage 2 separation: `PassthroughSeparator` (default) + `DemucsSeparator` (htdemucs_6s guitar stem).
+- Stage 3 transcription: `BasicPitchTranscriber` (default) + `FretNetTranscriber` +
+  `FusionTranscriber` (Basic Pitch notes + FretNet string/fret; the recommended method).
+  Now emits notes + string/fret + tempo/beats + pitch_contour. In-domain (acoustic GuitarSet)
+  TDR ~0.79-0.85; electric out-of-domain ~0.65. FretNet runs in a separate conda env via
+  subprocess. See docs/SPEC_transcription_fretnet.md.
+- Stage 4 techniques: `NoOpTechniqueDetector` (default) + `LearnedTechniqueDetector`
+  (palm-mute ~0.62, harmonic ~0.37) + `PerStringGlideDetector` (bend ~0.38) +
+  `ContourTechniqueDetector` (rule baseline). Vibrato + clean bend/slide split are the
+  open frontier. **See docs/SPEC_stage4_techniques.md for the full handoff (state, ruled-out
+  dead-ends, and build recipes for the frontier).**
 
 ## Commands
 
